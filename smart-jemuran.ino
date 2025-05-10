@@ -4,6 +4,7 @@
 #include "StatusLED.h"
 #include "NetworkManager.h"
 #include "MQTTManager.h"
+#include "Buzzer.h"
 
 // Pin Definitions
 #define RAINPIN_ANALOG 34
@@ -12,12 +13,14 @@
 #define SERVO_PIN 13
 #define REDLED 19
 #define GREENLED 18
+#define BUZZER_PIN 26
 
 // Global Objects
 SensorDHT sensorDHT(DHTPIN, DHT22);
 RainSensor rainSensor(RAINPIN_DIGITAL, RAINPIN_ANALOG);
 JemuranServo jemuran(SERVO_PIN);
 StatusLED statusLED(GREENLED, REDLED);
+Buzzer buzzer(BUZZER_PIN);
 NetworkManager networkManager;
 MQTTManager mqttManager;
 
@@ -72,6 +75,7 @@ void initializeComponents() {
   rainSensor.begin();
   jemuran.begin();
   statusLED.begin();
+   buzzer.begin();
 }
 
 bool calculateIdealConditions() {
@@ -109,6 +113,7 @@ void automaticServoControl() {
   if (rainSensor.getIsRaining() && jemuran.getStatus()) {
     targetServoState = false;
     needServoUpdate = true;
+    buzzer.beep(500);
     Serial.println("WARNING: Hujan terdeteksi! Menutup jemuran...");
   }
   else if (!rainSensor.getIsRaining() && !jemuran.getStatus() && calculateIdealConditions()) {
@@ -126,11 +131,18 @@ void updateServoIfNeeded() {
     } 
     else if (!targetServoState && jemuran.getStatus()) {
       jemuran.tutup();
+
+      // Setelah servo menutup, bunyikan buzzer selama 3 detik
+      buzzer.on();
+      delay(3000);
+      buzzer.off();
     }
+
     needServoUpdate = false;
     lastServoAction = millis();
   }
 }
+
 
 void handleUserInput() {
   if (Serial.available()) {
