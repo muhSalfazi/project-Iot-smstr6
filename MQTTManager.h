@@ -72,18 +72,20 @@ class MQTTManager {
       mqttClient.loop();
     }
     
-    void publishData(SensorDHT& dht, RainSensor& rain, bool isIdeal) {
+    void publishData(SensorDHT& dht, RainSensor& rain, const String& kondisiJemur)
+   {
       StaticJsonDocument<200> doc;
       doc["suhu"] = dht.getTemperature();
       doc["kelembapan"] = dht.getHumidity();
       doc["heat_index"] = dht.getHeatIndex();
       doc["dew_point"] = dht.getDewPoint();
       doc["hujan"] = rain.getRainType();
+      doc["kondisi"] = kondisiJemur;
+
       if(jemuranServo != nullptr) {
         doc["status_jemuran"] = jemuranServo->getStatus() ? "TERBUKA" : "TERTUTUP";
       }
-      doc["kondisi_ideal"] = isIdeal ? "IDEAL" : "TIDAK IDEAL";
-
+      doc["kondisi"] = kondisiJemur;
       char payload[256];
       serializeJson(doc, payload);
       mqttClient.publish(topic_publish, payload);
@@ -101,12 +103,12 @@ class MQTTManager {
         Serial.println(mqtt_port);
 
         // Uji koneksi TCP dulu
-        if (!espClient.connect(mqtt_server, mqtt_port)) {
-          Serial.println("❌ Tidak bisa connect TCP ke broker MQTT.");
-          delay(5000);
-          continue;
-        }
-        espClient.stop(); // tutup tes koneksi
+        // if (!espClient.connect(mqtt_server, mqtt_port)) {
+        //   Serial.println("❌ Tidak bisa connect TCP ke broker MQTT.");
+        //   delay(5000);
+        //   continue;
+        // }
+        // espClient.stop(); // tutup tes koneksi
         
         if (mqttClient.connect("ESP32Client")) {
           Serial.println("✅ MQTT connected");
