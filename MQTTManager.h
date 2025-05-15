@@ -8,17 +8,21 @@
 #include "RainSensor.h"
 #include "JemuranServo.h"
 
+// Variabel global dari main.ino
+extern bool needServoUpdate;
+extern bool targetServoState;
+
 class MQTTManager {
   private:
     WiFiClient espClient;
     PubSubClient mqttClient;
-    JemuranServo* jemuranServo;  // Pointer to JemuranServo
-    
-    const char* mqtt_server = "192.168.244.254"; // Local broker IP (removed space)
+    JemuranServo* jemuranServo;
+
+    const char* mqtt_server = "192.168.244.254"; // IP broker lokal
     const int mqtt_port = 1884;
     const char* topic_publish = "jemuran/data";
     const char* topic_subscribe = "jemuran/control";
-    
+
     void callback(char* topic, byte* payload, unsigned int length) {
       Serial.print("Pesan tiba [");
       Serial.print(topic);
@@ -31,27 +35,34 @@ class MQTTManager {
 
       if (strcmp(topic, topic_subscribe) == 0) {
         if (strcmp(message, "buka") == 0) {
+          Serial.println("MQTT: membuka jemuran...");
           if (jemuranServo != nullptr) {
-            jemuranServo->buka();
+            targetServoState = true;
+            needServoUpdate = true;
+          } else {
+            Serial.println("jemuranServo tidak diinisialisasi!");
           }
         } else if (strcmp(message, "tutup") == 0) {
+          Serial.println("MQTT: menutup jemuran...");
           if (jemuranServo != nullptr) {
-            jemuranServo->tutup();
-          }else {
+            targetServoState = false;
+            needServoUpdate = true;
+          } else {
+            Serial.println("jemuranServo tidak diinisialisasi!");
+          }
+        } else {
           Serial.println("Perintah tidak dikenali");
-        }
         }
       }
     }
 
-    
   public:
     MQTTManager() : mqttClient(espClient), jemuranServo(nullptr) {}
-    
+
     void setJemuranServo(JemuranServo* servo) {
       jemuranServo = servo;
     }
-    
+
     void setupMQTT() {
       Serial.print("Set MQTT broker: ");
       Serial.print(mqtt_server);
@@ -64,16 +75,14 @@ class MQTTManager {
       });
     }
 
-    
     void checkConnection() {
       if (!mqttClient.connected()) {
         reconnect();
       }
       mqttClient.loop();
     }
-    
-    void publishData(SensorDHT& dht, RainSensor& rain, const String& kondisiJemur)
-   {
+
+    void publishData(SensorDHT& dht, RainSensor& rain, const String& kondisiJemur) {
       StaticJsonDocument<200> doc;
       doc["suhu"] = dht.getTemperature();
       doc["kelembapan"] = dht.getHumidity();
@@ -82,37 +91,32 @@ class MQTTManager {
       doc["hujan"] = rain.getRainType();
       doc["kondisi"] = kondisiJemur;
 
-      if(jemuranServo != nullptr) {
+      if (jemuranServo != nullptr) {
         doc["status_jemuran"] = jemuranServo->getStatus() ? "TERBUKA" : "TERTUTUP";
       }
-      doc["kondisi"] = kondisiJemur;
+
       char payload[256];
       serializeJson(doc, payload);
       mqttClient.publish(topic_publish, payload);
     }
-    
+
     void publishAction(const char* action) {
       mqttClient.publish(topic_publish, action);
     }
-    unsigned long startAttempt = millis();
+
     void reconnect() {
-     while (!mqttClient.connected() && millis() - startAttempt < 15000) {
+      static unsigned long startAttempt = millis();
+      while (!mqttClient.connected() && millis() - startAttempt < 15000) {
         Serial.print("Coba konek MQTT ke ");
         Serial.print(mqtt_server);
         Serial.print(":");
         Serial.println(mqtt_port);
 
-        // Uji koneksi TCP dulu
-        // if (!espClient.connect(mqtt_server, mqtt_port)) {
-        //   Serial.println("❌ Tidak bisa connect TCP ke broker MQTT.");
-        //   delay(5000);
-        //   continue;
-        // }
-        // espClient.stop(); // tutup tes koneksi
-        
         if (mqttClient.connect("ESP32Client")) {
           Serial.println("✅ MQTT connected");
           mqttClient.subscribe(topic_subscribe);
+          startAttempt = millis(); // reset timer
+          break;
         } else {
           Serial.print("❌ MQTT failed, rc=");
           Serial.print(mqttClient.state());
@@ -121,7 +125,6 @@ class MQTTManager {
         }
       }
     }
-
 };
 
 #endif

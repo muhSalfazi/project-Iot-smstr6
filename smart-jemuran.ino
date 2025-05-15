@@ -15,6 +15,10 @@
 #define GREENLED 18
 #define BUZZER_PIN 26
 
+
+extern bool needServoUpdate;
+extern bool targetServoState;
+
 // Global Objects
 SensorDHT sensorDHT(DHTPIN, DHT22);
 RainSensor rainSensor(RAINPIN_DIGITAL, RAINPIN_ANALOG);
@@ -26,12 +30,13 @@ MQTTManager mqttManager;
 
 // Timing untuk servo, MQTT, dan Serial display
 unsigned long lastServoAction = 0;
-const unsigned long SERVO_INTERVAL = 100;      // servo check tiap 100 ms
+const unsigned long SERVO_INTERVAL = 100; // servo check tiap 100 ms
 bool needServoUpdate = false;
-bool targetServoState = false;                  // true = buka, false = tutup
+bool targetServoState = false; // true = buka, false = tutup
+bool closedBecauseRain = false; // tambahan: apakah tutup karena hujan?
 
 unsigned long lastDisplay = 0;
-const unsigned long DISPLAY_INTERVAL = 3000;   // tampil Serial tiap 3 detik
+const unsigned long DISPLAY_INTERVAL = 3000; // tampil Serial tiap 3 detik
 
 void setup() {
   Serial.begin(115200);
@@ -58,10 +63,10 @@ void loop() {
 
   // Logika kontrol
   controlLEDs(isIdeal);
-  automaticServoControl();        // set targetServoState & needServoUpdate
-  handleUserInput();              // bisa mengubah needServoUpdate juga
+  automaticServoControl(); // set targetServoState & needServoUpdate
+  handleUserInput();       // bisa mengubah needServoUpdate juga
   mqttManager.publishData(sensorDHT, rainSensor, getKondisiJemur());
-  updateServoIfNeeded();          // eksekusi servo non-blocking
+  updateServoIfNeeded();  // eksekusi servo non-blocking
 
   // Tampilkan ke Serial hanya setiap DISPLAY_INTERVAL
   if (millis() - lastDisplay >= DISPLAY_INTERVAL) {
@@ -75,7 +80,7 @@ void initializeComponents() {
   rainSensor.begin();
   jemuran.begin();
   statusLED.begin();
-   buzzer.begin();
+  buzzer.begin();
 }
 
 bool calculateIdealConditions() {
@@ -113,12 +118,13 @@ void automaticServoControl() {
   if (rainSensor.getIsRaining() && jemuran.getStatus()) {
     targetServoState = false;
     needServoUpdate = true;
-    buzzer.beep(500);
+    closedBecauseRain = true; // hanya nyalakan buzzer jika tutup karena hujan
+    buzzer.beep(500); // bunyi pendek tanda awal
     Serial.println("WARNING: Hujan terdeteksi! Menutup jemuran...");
-  }
-  else if (!rainSensor.getIsRaining() && !jemuran.getStatus() && calculateIdealConditions()) {
+  } else if (!rainSensor.getIsRaining() && !jemuran.getStatus() && calculateIdealConditions()) {
     targetServoState = true;
     needServoUpdate = true;
+    closedBecauseRain = false; // reset karena buka otomatis
     Serial.println("Cuaca ideal, membuka jemuran...");
   }
 }
@@ -128,21 +134,22 @@ void updateServoIfNeeded() {
   if (needServoUpdate && millis() - lastServoAction >= SERVO_INTERVAL) {
     if (targetServoState && !jemuran.getStatus()) {
       jemuran.buka();
-    } 
-    else if (!targetServoState && jemuran.getStatus()) {
+    } else if (!targetServoState && jemuran.getStatus()) {
       jemuran.tutup();
 
-      // Setelah servo menutup, bunyikan buzzer selama 3 detik
-      buzzer.on();
-      delay(3000);
-      buzzer.off();
+      // ✅ buzzer nyala 5 detik HANYA jika menutup karena hujan
+      if (closedBecauseRain) {
+        buzzer.on();
+        delay(5000);
+        buzzer.off();
+        closedBecauseRain = false;
+      }
     }
 
     needServoUpdate = false;
     lastServoAction = millis();
   }
 }
-
 
 void handleUserInput() {
   if (Serial.available()) {
@@ -152,8 +159,7 @@ void handleUserInput() {
       needServoUpdate = true;
       mqttManager.publishAction("buka");
       Serial.println("Perintah manual: buka jemuran");
-    } 
-    else if (cmd == 't') {
+    } else if (cmd == 't') {
       targetServoState = false;
       needServoUpdate = true;
       mqttManager.publishAction("tutup");
