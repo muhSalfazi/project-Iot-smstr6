@@ -5,6 +5,8 @@
 #include "NetworkManager.h"
 #include "MQTTManager.h"
 #include "Buzzer.h"
+#include "LightSensor.h"
+#include "RTCManager.h"
 
 // Pin Definitions
 #define RAINPIN_ANALOG 34
@@ -14,10 +16,8 @@
 #define REDLED 19
 #define GREENLED 18
 #define BUZZER_PIN 26
-
-
-extern bool needServoUpdate;
-extern bool targetServoState;
+#define LDR_PIN_ANALOG 35
+#define LDR_PIN_DIGITAL 32
 
 // Global Objects
 SensorDHT sensorDHT(DHTPIN, DHT22);
@@ -27,16 +27,18 @@ StatusLED statusLED(GREENLED, REDLED);
 Buzzer buzzer(BUZZER_PIN);
 NetworkManager networkManager;
 MQTTManager mqttManager;
+LightSensor lightSensor(LDR_PIN_ANALOG, LDR_PIN_DIGITAL);
+RTCManager rtcManager;
 
-// Timing untuk servo, MQTT, dan Serial display
+// Timing
 unsigned long lastServoAction = 0;
-const unsigned long SERVO_INTERVAL = 100; // servo check tiap 100 ms
+const unsigned long SERVO_INTERVAL = 100;
 bool needServoUpdate = false;
-bool targetServoState = false; // true = buka, false = tutup
-bool closedBecauseRain = false; // tambahan: apakah tutup karena hujan?
+bool targetServoState = false;
+bool closedBecauseRain = false;
 
 unsigned long lastDisplay = 0;
-const unsigned long DISPLAY_INTERVAL = 3000; // tampil Serial tiap 3 detik
+const unsigned long DISPLAY_INTERVAL = 3000;
 
 void setup() {
   Serial.begin(115200);
@@ -44,6 +46,8 @@ void setup() {
   mqttManager.setJemuranServo(&jemuran);
   networkManager.connectToWiFi();
   mqttManager.setupMQTT();
+  rtcManager.begin();
+
 }
 
 void loop() {
@@ -58,17 +62,14 @@ void loop() {
     return;
   }
 
-  // Hitung kondisi
   bool isIdeal = calculateIdealConditions();
-
-  // Logika kontrol
   controlLEDs(isIdeal);
-  automaticServoControl(); // set targetServoState & needServoUpdate
-  handleUserInput();       // bisa mengubah needServoUpdate juga
-  mqttManager.publishData(sensorDHT, rainSensor, getKondisiJemur());
-  updateServoIfNeeded();  // eksekusi servo non-blocking
+  automaticServoControl();
+  handleUserInput();
+  mqttManager.publishData(sensorDHT, rainSensor, lightSensor,rtcManager, getKondisiJemur());
 
-  // Tampilkan ke Serial hanya setiap DISPLAY_INTERVAL
+  updateServoIfNeeded();
+
   if (millis() - lastDisplay >= DISPLAY_INTERVAL) {
     displayData();
     lastDisplay = millis();
@@ -81,6 +82,7 @@ void initializeComponents() {
   jemuran.begin();
   statusLED.begin();
   buzzer.begin();
+  lightSensor.begin();
 }
 
 bool calculateIdealConditions() {
@@ -89,7 +91,8 @@ bool calculateIdealConditions() {
          (sensorDHT.getTemperature() <= 35) &&
          (sensorDHT.getHumidity() <= 70) &&
          (sensorDHT.getHeatIndex() < 40) &&
-         ((sensorDHT.getTemperature() - sensorDHT.getDewPoint()) > 2);
+         ((sensorDHT.getTemperature() - sensorDHT.getDewPoint()) > 2) &&
+         lightSensor.isCerahAnalog();
 }
 
 String getKondisiJemur() {
@@ -113,31 +116,27 @@ void controlLEDs(bool isIdeal) {
   }
 }
 
-// Set flag untuk servo, tanpa langsung menjalankannya
 void automaticServoControl() {
   if (rainSensor.getIsRaining() && jemuran.getStatus()) {
     targetServoState = false;
     needServoUpdate = true;
-    closedBecauseRain = true; // hanya nyalakan buzzer jika tutup karena hujan
-    buzzer.beep(500); // bunyi pendek tanda awal
+    closedBecauseRain = true;
+    buzzer.beep(500);
     Serial.println("WARNING: Hujan terdeteksi! Menutup jemuran...");
   } else if (!rainSensor.getIsRaining() && !jemuran.getStatus() && calculateIdealConditions()) {
     targetServoState = true;
     needServoUpdate = true;
-    closedBecauseRain = false; // reset karena buka otomatis
+    closedBecauseRain = false;
     Serial.println("Cuaca ideal, membuka jemuran...");
   }
 }
 
-// Eksekusi servo berdasarkan flag, non-blocking
 void updateServoIfNeeded() {
   if (needServoUpdate && millis() - lastServoAction >= SERVO_INTERVAL) {
     if (targetServoState && !jemuran.getStatus()) {
       jemuran.buka();
     } else if (!targetServoState && jemuran.getStatus()) {
       jemuran.tutup();
-
-      // ✅ buzzer nyala 5 detik HANYA jika menutup karena hujan
       if (closedBecauseRain) {
         buzzer.on();
         delay(5000);
@@ -145,7 +144,6 @@ void updateServoIfNeeded() {
         closedBecauseRain = false;
       }
     }
-
     needServoUpdate = false;
     lastServoAction = millis();
   }
@@ -177,6 +175,10 @@ void displayData() {
   Serial.printf("Status Hujan: %s\n", rainSensor.getRainType());
   Serial.printf("Status Servo: %s\n", jemuran.getStatus() ? "TERBUKA" : "TERTUTUP");
   Serial.printf("Kondisi     : %s\n", getKondisiJemur().c_str());
+  Serial.printf("LDR Analog : %d (%s)\n", lightSensor.bacaAnalog(), lightSensor.isCerahAnalog() ? "Cerah" : "Gelap");
+  Serial.printf("LDR Digital: %s\n", lightSensor.bacaDigital() ? "Cerah" : "Gelap");
+  Serial.printf("Waktu      : %s\n", rtcManager.getFormattedTime().c_str());
+
   Serial.println(F("================================"));
 }
 

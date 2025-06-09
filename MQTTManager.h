@@ -7,6 +7,8 @@
 #include "SensorDHT.h"
 #include "RainSensor.h"
 #include "JemuranServo.h"
+#include "LightSensor.h" 
+#include "RTCManager.h"
 
 // Variabel global dari main.ino
 extern bool needServoUpdate;
@@ -18,7 +20,7 @@ class MQTTManager {
     PubSubClient mqttClient;
     JemuranServo* jemuranServo;
 
-    const char* mqtt_server = "192.168.244.254"; // IP broker lokal
+    const char* mqtt_server = "192.168.2.254"; // IP broker lokal
     const int mqtt_port = 1884;
     const char* topic_publish = "jemuran/data";
     const char* topic_subscribe = "jemuran/control";
@@ -82,18 +84,23 @@ class MQTTManager {
       mqttClient.loop();
     }
 
-    void publishData(SensorDHT& dht, RainSensor& rain, const String& kondisiJemur) {
+   void publishData(SensorDHT& dht, RainSensor& rain, LightSensor& light, RTCManager& rtc, const String& kondisiJemur) {
       StaticJsonDocument<200> doc;
       doc["suhu"] = dht.getTemperature();
       doc["kelembapan"] = dht.getHumidity();
       doc["heat_index"] = dht.getHeatIndex();
       doc["dew_point"] = dht.getDewPoint();
       doc["hujan"] = rain.getRainType();
+      doc["cahaya_analog"] = light.getAnalogValue();   
+      doc["cahaya_digital"] = light.getDigitalValue(); 
       doc["kondisi"] = kondisiJemur;
 
       if (jemuranServo != nullptr) {
         doc["status_jemuran"] = jemuranServo->getStatus() ? "TERBUKA" : "TERTUTUP";
       }
+
+       // Tambahkan waktu dari RTC
+      doc["waktu"] = rtc.getFormattedTime();
 
       char payload[256];
       serializeJson(doc, payload);
