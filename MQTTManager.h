@@ -20,8 +20,8 @@ private:
   PubSubClient mqttClient;
   JemuranServo* jemuranServo;
 
-  const char* mqtt_server = "192.168.2.254";  // IP broker lokal
-  const int mqtt_port = 1884;
+  const char* mqtt_server = "212.85.27.126";  // IP broker lokal
+  const int mqtt_port = 1883;
   const char* topic_publish = "jemuran/data";
   const char* topic_subscribe = "jemuran/control";
 

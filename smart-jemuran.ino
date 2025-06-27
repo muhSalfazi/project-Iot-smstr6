@@ -28,7 +28,7 @@ Buzzer buzzer(BUZZER_PIN);
 NetworkManager networkManager;
 MQTTManager mqttManager;
 LightSensor lightSensor(LDR_PIN_ANALOG, LDR_PIN_DIGITAL);
-RTCManager rtcManager;
+RTCManager rtcManager(networkManager);
 
 // Timing
 unsigned long lastServoAction = 0;
@@ -46,7 +46,10 @@ void setup() {
   mqttManager.setJemuranServo(&jemuran);
   networkManager.connectToWiFi();
   mqttManager.setupMQTT();
-  rtcManager.begin();
+  if (rtcManager.begin()) {
+    Serial.print("Waktu saat ini: ");
+    Serial.println(rtcManager.getFormattedTime());
+  }
 
 }
 

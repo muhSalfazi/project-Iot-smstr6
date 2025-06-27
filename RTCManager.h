@@ -3,23 +3,40 @@
 
 #include <RTClib.h>
 
+// Forward declaration
+class NetworkManager;
+
 class RTCManager {
   private:
     RTC_DS3231 rtc;
-
+    NetworkManager& networkManager;
+    
   public:
+    // Constructor dengan reference ke NetworkManager
+    explicit RTCManager(NetworkManager& nm) : networkManager(nm) {}
+
     bool begin() {
       if (!rtc.begin()) {
         Serial.println("RTC tidak terdeteksi!");
         return false;
       }
 
-      if (rtc.lostPower()) {
-        Serial.println("RTC kehilangan daya, atur ulang waktu...");
-        // Set waktu ke saat ini (hanya dilakukan sekali)
-        rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+      if (rtc.lostPower() || networkManager.isConnected()) {
+        Serial.println("Mengatur ulang waktu RTC...");
+        if (networkManager.isConnected()) {
+          DateTime ntpTime = networkManager.getNTPTime();
+          if (ntpTime.year() >= 2023) {
+            rtc.adjust(ntpTime);
+            Serial.println("Waktu RTC diatur dari NTP");
+          } else {
+            rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+            Serial.println("Waktu RTC diatur dari waktu kompilasi");
+          }
+        } else {
+          rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+          Serial.println("Waktu RTC diatur dari waktu kompilasi");
+        }
       }
-
       return true;
     }
 
