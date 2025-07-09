@@ -29,6 +29,11 @@ class Buzzer {
       ledcWrite(channel, 0);
     }
 
+    // Alias untuk off() - bisa dipanggil sebagai stop()
+    void stop() {
+      off();
+    }
+
     void beep(int duration = 300) {
       on();
       delay(duration);

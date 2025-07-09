@@ -40,6 +40,11 @@ bool closedBecauseRain = false;
 unsigned long lastDisplay = 0;
 const unsigned long DISPLAY_INTERVAL = 3000;
 
+// Buzzer Control
+unsigned long buzzerStartTime = 0;
+const unsigned long BUZZER_DURATION = 10000; // 10 detik dalam milidetik
+bool isBuzzerActive = false;
+
 void setup() {
   Serial.begin(115200);
   initializeComponents();
@@ -50,7 +55,6 @@ void setup() {
     Serial.print("Waktu saat ini: ");
     Serial.println(rtcManager.getFormattedTime());
   }
-
 }
 
 void loop() {
@@ -59,6 +63,17 @@ void loop() {
   // Baca sensor
   sensorDHT.bacaData();
   rainSensor.bacaData();
+
+  // Kontrol buzzer
+  if (isBuzzerActive) {
+    if (millis() - buzzerStartTime < BUZZER_DURATION) {
+      buzzer.beep(100); // Bunyi pendek 100ms
+      delay(100);       // Jeda 100ms antara beep
+    } else {
+      isBuzzerActive = false;
+      buzzer.stop();
+    }
+  }
 
   if (!sensorDHT.isDataValid()) {
     handleSensorError();
@@ -69,7 +84,7 @@ void loop() {
   controlLEDs(isIdeal);
   automaticServoControl();
   handleUserInput();
-  mqttManager.publishData(sensorDHT, rainSensor, lightSensor,rtcManager, getKondisiJemur());
+  mqttManager.publishData(sensorDHT, rainSensor, lightSensor, rtcManager, getKondisiJemur());
 
   updateServoIfNeeded();
 
@@ -120,32 +135,42 @@ void controlLEDs(bool isIdeal) {
 }
 
 void automaticServoControl() {
+  // Jika hujan dan jemuran terbuka, tutup jemuran
   if (rainSensor.getIsRaining() && jemuran.getStatus()) {
     targetServoState = false;
     needServoUpdate = true;
     closedBecauseRain = true;
-    buzzer.beep(500);
+    buzzerStartTime = millis(); // Catat waktu mulai buzzer
+    isBuzzerActive = true;      // Aktifkan buzzer
     Serial.println("WARNING: Hujan terdeteksi! Menutup jemuran...");
-  } else if (!rainSensor.getIsRaining() && !jemuran.getStatus() && calculateIdealConditions()) {
+  } 
+  // Jika tidak hujan dan jemuran tertutup karena hujan sebelumnya, langsung buka
+  else if (!rainSensor.getIsRaining() && closedBecauseRain && !jemuran.getStatus()) {
     targetServoState = true;
     needServoUpdate = true;
     closedBecauseRain = false;
+    isBuzzerActive = false; // Matikan buzzer jika hujan berhenti
+    buzzer.stop();          // Pastikan buzzer mati
+    Serial.println("Hujan sudah berhenti, membuka jemuran...");
+  }
+  // Jika kondisi ideal dan jemuran tertutup (bukan karena hujan), buka jemuran
+  else if (!rainSensor.getIsRaining() && !jemuran.getStatus() && calculateIdealConditions() && !closedBecauseRain) {
+    targetServoState = true;
+    needServoUpdate = true;
     Serial.println("Cuaca ideal, membuka jemuran...");
   }
 }
 
 void updateServoIfNeeded() {
   if (needServoUpdate && millis() - lastServoAction >= SERVO_INTERVAL) {
-    if (targetServoState && !jemuran.getStatus()) {
-      jemuran.buka();
-    } else if (!targetServoState && jemuran.getStatus()) {
-      jemuran.tutup();
-      if (closedBecauseRain) {
-        buzzer.on();
-        delay(5000);
-        buzzer.off();
-        closedBecauseRain = false;
+    if (targetServoState != jemuran.getStatus()) {  
+      if (targetServoState) {
+        jemuran.buka();
+      } else {
+        jemuran.tutup();
       }
+      Serial.print("Servo diupdate ke: ");
+      Serial.println(targetServoState ? "TERBUKA" : "TERTUTUP");
     }
     needServoUpdate = false;
     lastServoAction = millis();
